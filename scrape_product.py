@@ -36,7 +36,7 @@ def check_valid_array(array, ignore):
     return True
 
 
-def check_parents_class(element, ignore):
+def check_parents(element, ignore):
     """ for each of element's parents, check if the parent's class includes a word in ignore
     Params: element - soup element to check parents of
             ignore - array of words to check if element's parent's class contains
@@ -49,6 +49,8 @@ def check_parents_class(element, ignore):
         if parent.get('class') != None:
             print(parent['class'])
             if not check_valid_array(parent['class'], ignore):
+                return False
+            if not check_valid_array(parent.text, ignore):
                 return False
     return True
 
@@ -71,15 +73,15 @@ def scrape_page(url):
     page = requests.get(url)
     soup = BeautifulSoup(page.content, 'html.parser')
     
-    ignore = ["additional", "related", "similar", "cart"]
-    ignore_after = ["additional", "related", "similar"]
-    price_keywords = ["price", "Price"]
+    ignore = ["related", "similar", "cart"]
+    ignore_after = ["related", "similar", "frequently", "add to cart"]
+    price_keywords = ["price", "Price", "Pricing"]
     price_divs = soup.select(build_css_selector(price_keywords, ignore))
     prevPrice, currPrice, onSale = None, None, False
     possiblePrices = set()
     for div in price_divs:
         if div.parent.get('class') == None or check_valid_array(div.parent['class'], ['cart']):
-            if check_parents_class(div, ignore_after):
+            if check_parents(div, ignore_after):
                 print("found one price!", div.text)
                 # find all currencies in div text replacing any space characters
                 for item in re.findall("(?:[\£\$\€]{1} *[,\d]+.?\d*)", div.text.replace(u'\xa0', ' ')):
@@ -107,7 +109,7 @@ def scrape_page(url):
         prevPrice = convert_to_currency_string(maxPrice, currency)
         
     result = {
-        "product_title": soup.title.string,
+        "product_title": re.sub(r'[^A-Za-z0-9 ]+', '', soup.title.string),
         "prevPrice": prevPrice,
         "currPrice": currPrice,
         "onSale": onSale
