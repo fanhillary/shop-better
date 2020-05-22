@@ -22,7 +22,7 @@ def build_css_selector(important, ignore):
     return selector[:-2]
 
 
-def check_ignore_in_string(array, ignore):
+def check_valid_array(array, ignore):
     """ check if any of the words in ignore are contains in any of the strings in array
     Params: array - array of strings to check 
             ignore - array of words to avoid in array
@@ -43,12 +43,25 @@ def check_parents_class(element, ignore):
     Returns: True - none of the parents' classes include a word from ignore
              False - at least one of the parents' classes include a word from ignore array
     """
+    print(element.text)
     for parent in element.parents:
         # if parent class has something from ignore array, break out of looping parents
         if parent.get('class') != None:
-            if not check_ignore_in_string(parent['class'], ignore):
+            print(parent['class'])
+            if not check_valid_array(parent['class'], ignore):
                 return False
     return True
+
+def convert_to_currency_string(price, currency):
+    """Combine price to correctly formatted currency string
+    Params: price - price value to convert to string
+            currency - the currency of the price given
+    Returns: Properly formatted price string
+    """
+    currPrice = currency + str(price)
+    remaining = 6 - len(currPrice)
+    currPrice += '0' * remaining
+    return currPrice
 
 def scrape_page(url):
     """ scrape url given and returns title of product, price, previous price, styles, photoURL
@@ -60,32 +73,47 @@ def scrape_page(url):
     
     ignore = ["additional", "related", "similar", "cart"]
     ignore_after = ["additional", "related", "similar"]
-    price_keywords = ["price"]
-    prices_possibilites = soup.select(build_css_selector(price_keywords, ignore))
-    prevPrice, currPrice = "", ""
-    for price in prices_possibilites:
-        if check_parents_class(price, ignore_after):
-            currency = re.findall("(?:[\£\$\€]{1}[,\d]+.?\d*)", price.text)
-            # for now only does for USD currency
-            if len(currency) > 1: # on sale theoretically
-                if currency[0] <= currency[1]:
-                    prevPrice = currency[1]
-                    currPrice = currency[0]
-                else:
-                    prevPrice = currency[0]
-                    currPrice = currency[1]
-        else:
-            break
+    price_keywords = ["price", "Price"]
+    price_divs = soup.select(build_css_selector(price_keywords, ignore))
+    prevPrice, currPrice, onSale = None, None, False
+    possiblePrices = set()
+    for div in price_divs:
+        if div.parent.get('class') == None or check_valid_array(div.parent['class'], ['cart']):
+            if check_parents_class(div, ignore_after):
+                print("found one price!", div.text)
+                # find all currencies in div text replacing any space characters
+                for item in re.findall("(?:[\£\$\€]{1} *[,\d]+.?\d*)", div.text.replace(u'\xa0', ' ')):
+                    possiblePrices.add(item)
+            else:
+                break
 
+    print('possiblePrices', possiblePrices)
+    possiblePrices = list(possiblePrices)
+    if len(possiblePrices) == 1:
+        prevPrice = possiblePrices[0]
+        currPrice = possiblePrices[0]
+    elif len(possiblePrices) > 1:
+        # assume on sale if 2 prices found
+        onSale = True
+
+        currency = possiblePrices[0][0]
+        minPrice = float(possiblePrices[0][1:])
+        maxPrice = minPrice
+        for price in possiblePrices:
+            value = float(price[1:])
+            minPrice = min(minPrice, value)
+            maxPrice = max(maxPrice, value)
+        currPrice = convert_to_currency_string(minPrice, currency)
+        prevPrice = convert_to_currency_string(maxPrice, currency)
         
     result = {
         "product_title": soup.title.string,
         "prevPrice": prevPrice,
-        "currPrice": currPrice
+        "currPrice": currPrice,
+        "onSale": onSale
     }
 
     return json.dumps(result)
-
 
 if __name__ == "__main__":
     print(scrape_page(sys.argv[1]))
