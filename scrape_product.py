@@ -12,12 +12,14 @@ def build_css_selector(important, ignore):
             ignore - array of words to ignore elements with this word in it's class
     Returns: selector string for searching elements that include important class and don't have ignore class
     """
+    attributes = ['class', 'data-at']
     selector = ""
     for word in important:
-        selector += "[class*='" + word + "']"
-        for word in ignore:
-            selector += ":not([class*='" + word + "'])"
-        selector += ", "
+        for attr in attributes:
+            selector += "[" + attr +"*='" + word + "']"
+            for ignore_word in ignore:
+                selector += ":not([class*='" + ignore_word + "'])"
+            selector += ", "
   
     return selector[:-2]
 
@@ -72,11 +74,11 @@ def scrape_page(url):
     """
     page = requests.get(url)
     soup = BeautifulSoup(page.content, 'html.parser')
-    
     ignore = ["related", "similar", "cart"]
-    ignore_after = ["related", "similar", "frequently", "add to cart"]
+    ignore_after = ["related", "similar", "recommended", "frequently", "add to cart"]
     price_keywords = ["price", "Price", "Pricing"]
     price_divs = soup.select(build_css_selector(price_keywords, ignore))
+    print(soup.prettify())
     prevPrice, currPrice, onSale = None, None, False
     possiblePrices = set()
     for div in price_divs:
@@ -114,14 +116,12 @@ def scrape_page(url):
         "currPrice": currPrice,
         "onSale": onSale
     }
-
     return json.dumps(result)
 
 if __name__ == "__main__":
-    print(scrape_page(sys.argv[1]))
-    # string =['related-time', 'related-products-wrapper', 'product-section']
-    # ignore = ["additional", "related", "similar"]
-    # print(check_ignore_in_string(string, ignore))
+    url = sys.argv[1]
+    print(scrape_page(url.split('?')[0]))
+    
 
 def scrape_page2(url):
     """ scrape url given and returns title of product, price, previous price, styles, photoURL
