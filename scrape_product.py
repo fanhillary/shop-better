@@ -1,10 +1,12 @@
 # -*- coding: utf-8 -*-
 
-from bs4 import BeautifulSoup
+from bs4 import BeautifulSoup, Tag
 import sys
 import requests
 import json
 import re
+MATCH_ALL = r'.*'
+
 
 def build_css_selector(important, ignore):
     """ build css selector string for beautifulsoup to parse pertinent elements
@@ -38,7 +40,7 @@ def check_valid_array(array, ignore):
     return True
 
 
-def check_parents(element, ignore):
+def check_up_to(element, check_type, up_to, ignore):
     """ for each of element's parents, check if the parent's class includes a word in ignore
     Params: element - soup element to check parents of
             ignore - array of words to check if element's parent's class contains
@@ -46,14 +48,28 @@ def check_parents(element, ignore):
              False - at least one of the parents' classes include a word from ignore array
     """
     print(element.text)
-    for parent in element.parents:
-        # if parent class has something from ignore array, break out of looping parents
-        if parent.get('class') != None:
-            print(parent['class'])
-            if not check_valid_array(parent['class'], ignore):
-                return False
-            if not check_valid_array(parent.text, ignore):
-                return False
+    if check_type == "parents":
+        for parent in element.parents:
+            if parent == up_to:
+                return True
+            # if parent class has something from ignore array, break out of looping parents
+            if parent.get('class') != None:
+                print(parent['class'])
+                if not check_valid_array(parent['class'], ignore):
+                    return False
+                if not check_valid_array(parent.text, ignore):
+                    return False
+    elif check_type == "previous":
+        for prev in element.previous_elements:
+            if prev == up_to:
+                return True
+            # if parent class has something from ignore array, break out of looping parents
+            if isinstance(prev, Tag) and prev.get('class') != None:
+                print(prev['class'])
+                if not check_valid_array(prev['class'], ignore):
+                    return False
+                if not check_valid_array(prev.text, ignore):
+                    return False
     return True
 
 def convert_to_currency_string(price, currency):
@@ -67,49 +83,52 @@ def convert_to_currency_string(price, currency):
     currPrice += '0' * remaining
     return currPrice
 
+def set_price(currency, priceA, priceB):
+    prevPrice = min(priceA, priceB)
+    currPrice = max(priceA, priceB)
+    return (convert_to_currency_string(prevPrice, currency), convert_to_currency_string(currPrice, currency))
+
 def scrape_page(url):
     """ scrape url given and returns title of product, price, previous price, styles, photoURL
     Param: url - url to scrape
     Returns: json format holding title, price, prevPrice, styles, photoURL
     """
+    style = ["style", "variation", "version"]
+    img = ["img", "carousel"]
     page = requests.get(url)
     soup = BeautifulSoup(page.content, 'html.parser')
     ignore = ["related", "similar", "cart"]
     ignore_after = ["related", "similar", "recommended", "frequently", "add to cart"]
-    price_keywords = ["price", "Price", "Pricing"]
+    price_keywords = ['Price', 'price', 'Pricing', 'pricing']
     price_divs = soup.select(build_css_selector(price_keywords, ignore))
-    print(soup.prettify())
+    # price_divs = soup.find(text=like('$'))
+    # price_divs = find_by_text(soup, ['$'], 'div')
+    # price_divs = soup.findAll(lambda tag:tag.name=="div" and "$" in tag.text)
+    # pattern = re.compile('$')
+    # price_divs = soup.findAll(text=pattern)
+ 
     prevPrice, currPrice, onSale = None, None, False
-    possiblePrices = set()
+    previousDivParent = None
+    foundPrices = {}
     for div in price_divs:
         if div.parent.get('class') == None or check_valid_array(div.parent['class'], ['cart']):
-            if check_parents(div, ignore_after):
-                print("found one price!", div.text)
-                # find all currencies in div text replacing any space characters
-                for item in re.findall("(?:[\£\$\€]{1} *[,\d]+.?\d*)", div.text.replace(u'\xa0', ' ')):
-                    possiblePrices.add(item)
-            else:
+            # if check_up_to(div, "previous", previousDivParent, ignore_after):
+            # find all currencies in div text replacing any space characters
+            possPrices = re.findall("(?:[\£\$\€]{1} *[,\d]+.?\d*)", div.text.replace(u'\xa0', ' '))
+            print('prices found:', possPrices)
+            if len(possPrices) == 2:
+                currPrice, prevPrice = set_price(possPrices[0][0], float(possPrices[0][1:]), float(possPrices[1][1:]))
                 break
+            elif len(possPrices) == 1:
+                if div.parent not in foundPrices:
+                    foundPrices[div.parent] = possPrices[0]
+                    currPrice = convert_to_currency_string(float(possPrices[0][1:]), possPrices[0][0])
+                    prevPrice = currPrice
+                else:
+                    currPrice, prevPrice = set_price(possPrices[0][0], float(possPrices[0][1:]), float(foundPrices[div.parent][1:]))
+                    break
+        previousDivParent = div.parent
 
-    print('possiblePrices', possiblePrices)
-    possiblePrices = list(possiblePrices)
-    if len(possiblePrices) == 1:
-        prevPrice = possiblePrices[0]
-        currPrice = possiblePrices[0]
-    elif len(possiblePrices) > 1:
-        # assume on sale if 2 prices found
-        onSale = True
-
-        currency = possiblePrices[0][0]
-        minPrice = float(possiblePrices[0][1:])
-        maxPrice = minPrice
-        for price in possiblePrices:
-            value = float(price[1:])
-            minPrice = min(minPrice, value)
-            maxPrice = max(maxPrice, value)
-        currPrice = convert_to_currency_string(minPrice, currency)
-        prevPrice = convert_to_currency_string(maxPrice, currency)
-        
     result = {
         "product_title": re.sub(r'[^A-Za-z0-9 ]+', '', soup.title.string),
         "prevPrice": prevPrice,
@@ -118,6 +137,36 @@ def scrape_page(url):
     }
     return json.dumps(result)
 
+
+def like(string):
+    """
+    Return a compiled regular expression that matches the given
+    string with any prefix and postfix, e.g. if string = "hello",
+    the returned regex matches r".*hello.*"
+    """
+    string_ = string
+    if not isinstance(string_, str):
+        string_ = str(string_)
+    regex = MATCH_ALL + re.escape(string_) + MATCH_ALL
+    return re.compile(regex, flags=re.DOTALL)
+
+
+def find_by_text(soup, text, tag):
+    """
+    Find the tag in soup that matches all provided kwargs, and contains the
+    text.
+
+    If no match is found, return None.
+    If more than one match is found, raise ValueError.
+    """
+    elements = soup.find_all(tag)
+    matches = []
+    for element in elements:
+        for txt in text:
+            if element.find(text=like(txt)):
+                matches.append(element)
+                break
+    return matches
 if __name__ == "__main__":
     url = sys.argv[1]
     print(scrape_page(url.split('?')[0]))
