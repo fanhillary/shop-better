@@ -5,8 +5,8 @@ import sys
 import requests
 import json
 import re
+import time
 MATCH_ALL = r'.*'
-
 
 def build_css_selector(important, ignore):
     """ build css selector string for beautifulsoup to parse pertinent elements
@@ -14,13 +14,13 @@ def build_css_selector(important, ignore):
             ignore - array of words to ignore elements with this word in it's class
     Returns: selector string for searching elements that include important class and don't have ignore class
     """
-    attributes = ['class', 'data-at']
+    attributes = ['class', 'data-at', 'id']
     selector = ""
     for word in important:
         for attr in attributes:
             selector += "[" + attr +"*='" + word + "']"
             for ignore_word in ignore:
-                selector += ":not([class*='" + ignore_word + "'])"
+                selector += ":not([" + attr + "*='" + ignore_word + "'])"
             selector += ", "
   
     return selector[:-2]
@@ -95,15 +95,19 @@ def scrape_page(url):
     """
     style = ["style", "variation", "version"]
     img = ["img", "carousel"]
-    page = requests.get(url)
+    page = requests.get(url,headers={"User-Agent":"Defined"})
+    time.sleep(5)
     soup = BeautifulSoup(page.content, 'html.parser')
+    return soup.prettify
+    # page = '<span id="priceblock_ourprice" class="a-size-medium a-color-price priceBlockBuyingPriceString">$11.97</span>'
+    # soup = BeautifulSoup(page, 'html.parser')
     ignore = ["related", "similar", "cart"]
     ignore_after = ["related", "similar", "recommended", "frequently", "add to cart"]
     price_keywords = ['Price', 'price', 'Pricing', 'pricing']
     price_divs = soup.select(build_css_selector(price_keywords, ignore))
     # price_divs = soup.find(text=like('$'))
     # price_divs = find_by_text(soup, ['$'], 'div')
-    # price_divs = soup.findAll(lambda tag:tag.name=="div" and "$" in tag.text)
+    # price_divs = soup.findAll(lambda tag:tag.name=="span" and "$" in tag.text)
     # pattern = re.compile('$')
     # price_divs = soup.findAll(text=pattern)
  
@@ -111,6 +115,7 @@ def scrape_page(url):
     previousDivParent = None
     foundPrices = {}
     for div in price_divs:
+        print(div)
         if div.parent.get('class') == None or check_valid_array(div.parent['class'], ['cart']):
             # if check_up_to(div, "previous", previousDivParent, ignore_after):
             # find all currencies in div text replacing any space characters
@@ -167,6 +172,8 @@ def find_by_text(soup, text, tag):
                 matches.append(element)
                 break
     return matches
+
+    
 if __name__ == "__main__":
     url = sys.argv[1]
     print(scrape_page(url.split('?')[0]))
